@@ -1,7 +1,9 @@
 # Usage
 Simply start the editor, click on "File" and then open the desired items.sav file.
 After loading, you can switch between the items via the top right drop down menu.
-In the list below you can see the item values. You can change them as desired and save the items.sav, or you click on "Save as" to save a new one with a different file name.
+In the list below you can see the item values. You can change them as desired.
+![grafik](https://github.com/M3tox/HD2ItemValueEditor/assets/75583358/f173ccda-c11f-4168-85a6-b3a1de342b69)
+When done save the items.sav, or click on "Save as" to save a new file with a different file name.
 
 To add whole NEW items, simply use one of the empty slots. H&D2 without the addon supports 255 items in total, but H&D2 with Sabre Squadron supports 500 items, which gives plenty of extra new slots.
 
