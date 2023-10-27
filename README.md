@@ -7,6 +7,7 @@ In the list below you can see the item values. You can change them as desired.
 When done save the items.sav, or click on "Save as" to save a new file with a different file name.
 
 To add whole NEW items, simply use one of the empty slots. H&D2 without the addon supports 255 items in total, but H&D2 with Sabre Squadron supports 500 items, which gives plenty of extra new slots.
+Don't forget to change the record type from EMPTY to the desired form, otherwise you can't edit the necessary fields.
 
 Not all fields are known. If you found something out or if you want me to correct some of the labels, simply contact me in discord or report it as an "Issue" here in github.
 
