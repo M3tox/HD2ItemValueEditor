@@ -23,7 +23,6 @@ EVT_MENU(ABOUT, cMain::OnAbout)
 EVT_MENU(EXITAPP, cMain::OnMenuExit)
 EVT_TEXT(wxID_ANY, cMain::OnValueChange)
 EVT_COMBOBOX(SELECTCHG, cMain::OnSelectionChange)
-EVT_COMBOBOX(SELECTREC, cMain::OnSelectRecChange)
 EVT_CLOSE(cMain::OnClose)
 wxEND_EVENT_TABLE()
 
@@ -43,7 +42,7 @@ cMain::cMain() : wxFrame(nullptr, wxID_ANY, "H&D2 Item Value Editor", wxDefaultP
 	m_MenuBar->Append(menuFile, "File");
 
 	menuExtras = new wxMenu();
-	menuExtras->Append(EXPORTCSV, "Export as CSV file")->Enable(false);
+	//menuExtras->Append(EXPORTCSV, "Export as CSV file")->Enable(false);
 	menuExtras->Append(ABOUT, "About...");
 	m_MenuBar->Append(menuExtras, "Extras");
 
@@ -58,12 +57,20 @@ cMain::cMain() : wxFrame(nullptr, wxID_ANY, "H&D2 Item Value Editor", wxDefaultP
 	hbp->Add(selector, 1, wxALIGN_CENTRE);
 	topInfoPlane->SetSizerAndFit(hbp);
 
+	scrolleditemList = nullptr;
+
 	vbp = new wxBoxSizer(wxVERTICAL);
 
 	vbp->Add(topInfoPlane, 0, wxGROW);
 
 	this->SetSizer(vbp);
 
+
+	primaryArea = new wxBoxSizer(wxVERTICAL);
+
+	scrolleditemList = new wxScrolledWindow(this, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxVSCROLL);
+	scrolleditemList->Hide();
+	vbp->Add(scrolleditemList, 1, wxEXPAND);
 }
 
 cMain::~cMain() {
@@ -117,13 +124,17 @@ void cMain::OnMenuOpenFile(wxCommandEvent& evt) {
 	selector->Clear();
 	// update dropdown menu
 	for (uint32_t i = 0; i < ItemValues->getItemCount(); i++) {
-		wxString name("ID: " + std::to_string(i) + " | "+ ItemValues->getItemName(i));
+		wxString name("ID: " + std::to_string(i) + " | ");
+		if (ItemValues->getRecordType(i) == nullptr || *ItemValues->getRecordType(i) == Items::EMPTY)
+			name.append("EMPTY SLOT");
+		else
+			name.append(ItemValues->getItemName(i));
 		selector->AppendString(name);
 	}
 	selector->Select(0);
 
 	// update fields
-	refreshDisplayedData();
+	drawDataFields();
 
 	evt.Skip();
 }
@@ -186,108 +197,285 @@ void cMain::OnClose(wxCloseEvent& evt)
 void cMain::OnSelectionChange(wxCommandEvent& evt)
 {
 	selectedItem = selector->GetSelection();
-	refreshDisplayedData();
+	drawDataFields();
 	evt.Skip();
 }
 
-void cMain::OnSelectRecChange(wxCommandEvent& evt)
-{
-	;
-	if (!ItemValues->setRecordType(selectedItem, selectorRecord->GetSelection())) {
-		wxMessageBox("ERROR: Invalid selection!", "Error Message", wxICON_ERROR | wxOK);
+void cMain::drawDataFields(bool skipMsg) {
+
+	int32_t* recordType = ItemValues->getRecordType(selectedItem);
+	if (recordType == nullptr || *recordType == Items::EMPTY) {
+		scrolleditemList->Hide();
+
+		if (skipMsg) return;
+
+		int32_t msg = wxMessageBox("This Item Record is empty, would you like to create one?", "Item Record", wxYES_NO);
+		if (msg == wxYES) {
+			ItemValues->insertNewRecord(selectedItem);
+			// refresh recordType with new location
+			recordType = ItemValues->getRecordType(selectedItem);
+			*recordType = Items::GEAR;
+			selector->SetString(selectedItem, "ID: " + std::to_string(selectedItem) + " | New item");
+		} else
+			return;
+	} else if (*recordType > 3) {
+		wxMessageBox("Record type not defined! It was " + std::to_string(*recordType), "Error Message", wxICON_ERROR | wxOK);
 		return;
 	}
-	dataChanged = true;
-	refreshDisplayedData();
-	evt.Skip();
-}
 
-void cMain::refreshDisplayedData() {
-
+	//std::string descr;
+	//std::string val;
 	
-	std::string descr;
-	std::string val;
+	scrolleditemList->Hide();
+	for (auto& s : sections)
+		delete s;
+	sections.clear();
 
-	if (scrolleditemList) {
-		// IF its the exact same data structure, recycle the current one and only update the data fields!
-		selectorRecord->Select(ItemValues->getRecordType(selectedItem));
-		// update only data fields
+	// generate the basic fields that are in all types
+	// 
+	// add selector for record type via dropdown
+	std::vector<wxString> ddLabels;
+	ddLabels = { "AMMO", "WEAPON", "GEAR", "EMPTY"};
+	addDropDown("Record type: ", ddLabels, *recordType);
 
-		const uint32_t sectionCount = dataFields.size();
-		for (uint32_t i = 0; i < sectionCount; i++) {
-			if (!ItemValues->getFieldInformation(selectedItem, i, val)) {
-				wxMessageBox("ERROR: Item index out of bounds!", "Error Message", wxICON_ERROR | wxOK);
-				break;
-			}
+	Items::ItemBase* itemRef = ItemValues->getItemReference(selectedItem);
+	addField("FPV Model reference", itemRef->strModelFPV);
+	addField("Image reference", itemRef->strImage);
+	addField("Model reference", itemRef->strModel);
+	addField("Label", itemRef->labelName);
+	addField("Text reference ID", itemRef->textRefID);
+	addField("Item weight", itemRef->weight);
+	addField("Inventory slot", itemRef->inventorySlotType);
+	addField("Category", itemRef->category);
+	addField("Armed sound reference ID", itemRef->unknownI4);
+	addField("Team ID", itemRef->teamID);
 
-			dataFields.at(i)->ChangeValue(val);
-			if (ItemValues->isFieldActive(selectedItem, i))
-				dataFields.at(i)->Enable();
-			else
-				dataFields.at(i)->Disable();
-		}
-		vbp->Layout();
-		return;
+	int32_t itemTypeToSelect = itemRef->itemType;
+	ddLabels.clear();
+	switch (*recordType) {
+	case Items::AMMO:
+		ddLabels = { "Standard (0)"};
+		break;
+	case Items::WEAPONS:
+		ddLabels = {"Melee (1)", "Passive Explosives (2)", "Active Explosives (3)", "Firearm (4)","Special knives (6)"};
+		itemTypeToSelect--;
+		if (itemTypeToSelect == 5) itemTypeToSelect--;
+		break;
+	case Items::GEAR:
+		ddLabels = { "Standard (0)", "Binocular (5)","Uniform (6)", "Healing (7)", "Backpack (8)", "Headgear (9)", "Special (10)" };
+		if (itemTypeToSelect != 0) itemTypeToSelect -= 4;
+		break;
+	}
+	addDropDown("Item type: ", ddLabels, itemRef->itemType, itemTypeToSelect);
+	//ddLabels = { "Standard (0)", "Melee (1)", "Passive Explosives (2)", "Active Explosives (3)", "Firearm (4)",
+	//			"Binocular (5)","Uniform (6)", "Healing (7)", "Backpack (8)", "Headgear (9)", "Unknown (10)" };
+
+
+
+	//memcpy(mainSections, sections.data(),sizeof(mainSections));
+	//sections.clear();
+
+	scrolleditemList->SetSizer(primaryArea);
+	scrolleditemList->SetScrollRate(20, 20);
+
+	// now check what comes next and show specialized data
+	refreshDataFields(itemRef);
+
+
+	dataChanged = false;
+}
+
+void cMain::refreshDataFields(Items::ItemBase* itemRef) {
+	
+	//scrolleditemList->Hide();
+
+	//for (auto& s : sections)
+	//	delete s;
+	//sections.clear();
+
+	switch (int32_t selType = *ItemValues->getRecordType(selectedItem)) {
+	case Items::AMMO:
+	{
+		Items::Ammo* ammoRef = (Items::Ammo*)itemRef;
+		addField("Ammo capacity", ammoRef->ammoCapacity);
+		break;
 	}
 
+	case Items::WEAPONS:
+	{
+		{
+			Items::Weapon* mRef = (Items::Weapon*)itemRef;
+			addField("Weapon Type", mRef->weaponType);
+			addField(mRef->unknownF1);
+			addField("Damage", mRef->Damage);
+			addField("Shoot sound reference ID", mRef->unknownI1);
+			addField("Fire trigger delay", mRef->fireDelay);
+			addField(mRef->unknownI2);
+			addField("Reload any moment / last patron",mRef->reloadable);
+		}
 
-	scrolleditemList = new wxScrolledWindow(this, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxVSCROLL);
-	scrolleditemList->Hide();
+		int32_t* posExtraData = nullptr;
 
-	vbp->Add(scrolleditemList, 1, wxEXPAND);
-
-
-	wxBoxSizer* itemSizer = new wxBoxSizer(wxVERTICAL);
-
-	// add selector for record type via dropdown
-	selectorRecord = new wxComboBox(scrolleditemList, SELECTREC, wxEmptyString, wxDefaultPosition, wxDefaultSize, 0, 0, wxCB_READONLY);
-	selectorRecord->AppendString("AMMO");
-	selectorRecord->AppendString("ANIMATED");
-	selectorRecord->AppendString("STATIC");
-	selectorRecord->AppendString("EMPTY");
-	selectorRecord->Select(ItemValues->getRecordType(selectedItem));
-
-	wxBoxSizer* colSizer0 = new wxBoxSizer(wxHORIZONTAL);
-	colSizer0->AddSpacer(10);
-	colSizer0->Add(new wxStaticText(scrolleditemList, wxID_ANY, "Record Type: "), 2, wxGROW | wxALL, 2);
-	colSizer0->Add(selectorRecord, 2, wxGROW | wxALL, 2);
-
-	itemSizer->Add(colSizer0, 1, wxEXPAND);
-
-	// add a series of widgets
-	const uint32_t sectionCount = ItemValues->getFieldCount();
-
-	dataFields.reserve(sectionCount);
-	for (uint32_t i = 0; i < sectionCount; i++) {
-
-		wxBoxSizer* colSizer = new wxBoxSizer(wxHORIZONTAL);
-		colSizer->AddSpacer(10);
-		
-		if (!ItemValues->getFieldInformation(selectedItem, i, descr, val)) {
-			wxMessageBox("Item index out of bounds!", "Error Message", wxICON_ERROR | wxOK);
+		switch (int32_t itemType = itemRef->itemType) {
+		case Items::MELEE:
+		{
+			Items::Melee* mRef = (Items::Melee*)itemRef;
+			addField(mRef->unknownF2);
+			addField(mRef->unknownI3);
+			addField(mRef->unknownI4);
 			break;
 		}
+		case Items::EXPLOPASSIVE:
+		{
+			Items::PassiveExplosive* mRef = (Items::PassiveExplosive*)itemRef;
+			addField(mRef->unknownI3);
+			addField(mRef->unknownF2);
+			addField(mRef->extra2Type);
+			break;
+		}
+		case Items::EXPLOACTIVE:
+		{
+			Items::ActiveExplosive* mRef = (Items::ActiveExplosive*)itemRef;
+			addField("Short Reference", mRef->shortName);
+			addField(mRef->unknownI4);
+			addField(mRef->unknownI5);
+			addField("Reload speed", mRef->unknownF4);
+			addField("Velocity m/s", mRef->velocity);
+			addField("Distance ideal", mRef->idealRange);
+			addField("Distance blind", mRef->unAimedDistance);
+			addField("Distance aimed", mRef->aimedDistance);
+			addField(mRef->unknownI6);
+			addField(mRef->unknownI7);
+			addField(mRef->unknownI8);
+			addField(mRef->unknownI9);
+			addField(mRef->unknownI10);
+			addField(mRef->unknownF8);
+			addField(mRef->unknownF9);
 
-		colSizer->Add(new wxStaticText(scrolleditemList, wxID_ANY, std::to_string(i+1)), 1, wxGROW | wxALL, 2);
-		colSizer->Add(new wxStaticText(scrolleditemList, wxID_ANY, descr), 3, wxGROW | wxALL, 2);
+			posExtraData = (int32_t*)&mRef->extra2Type;
+			if (*posExtraData == 5)
+				addDropDown("Optional extra fields", { "No","Yes" }, mRef->extra2Type, 1);
+			else
+				addDropDown("Optional extra fields", { "No","Yes" }, mRef->extra2Type);
+			//addField("Optional extra fields", *posExtraData);
 
-		dataFields.emplace_back(new wxTextCtrl(scrolleditemList, VALUECHNG+ i, val));
-		if (!ItemValues->isFieldActive(selectedItem, i))
-			dataFields.back()->Disable();
-		colSizer->Add(dataFields.back(), 3, wxGROW | wxALL, 2);
-		
-		itemSizer->Add(colSizer, 1, wxEXPAND);
+			break;
+		}
+		case Items::FIREARM:
+		{
+			Items::Firearm* mRef = (Items::Firearm*)itemRef;
+			addField(mRef->unknownF3_5);
+			addField(mRef->unknown12);
+			addField(mRef->unknown13);
+			addField(mRef->unknownF4);
+			addField("Velocity m/s", mRef->velocity);
+			addField("Distance ideal", mRef->idealRange);
+			addField("Distance blind", mRef->unAimedDistance);
+			addField("Distance aimed", mRef->aimedDistance);
+			addField(mRef->unknownF9);
+			addField(mRef->unknown14);
+			addField(mRef->unknown15);
+			addField("Short reference", mRef->shortName);
+			addField("Zoom factor", mRef->zoomFactor);
+
+			posExtraData = (int32_t*)&mRef->optionalExtra;
+			if (*posExtraData == 5)
+				addDropDown("Optional extra fields", { "No","Yes" }, mRef->optionalExtra, 1);
+			else
+				addDropDown("Optional extra fields", { "No","Yes" }, mRef->optionalExtra);
+			//addField("Optional extra fields", *posExtraData);
+
+			break;
+		}
+		case Items::UNIFORM:
+		{
+			Items::Uniform* mRef = (Items::Uniform*)itemRef;
+			// TODO: Find a solution...
+			break;
+		}
+		default:
+			wxMessageBox("ERROR: Item type not defined! It was " + std::to_string(itemType) + ". Selected: " + std::to_string(selType), "Error Message", wxICON_ERROR | wxOK);
+			return;
+		}
+
+		if (posExtraData) {
+			if (*posExtraData++) {
+				Items::OptionalExtra* opE = (Items::OptionalExtra*)posExtraData;
+				addField(opE->unknownI1);
+				addField(opE->unknownI2);
+				addField(opE->unknownI3);
+				addField(opE->unknownF);
+				posExtraData += 4;
+			}
+			Items::AmmoData* ad = (Items::AmmoData*)posExtraData;
+			addField(ad->Unknown1);
+			addField("Ammo type", ad->AmmoType);
+			addField(ad->Unknown3);
+			addField("Ammo ID", ad->AmmoID);
+		}
+
+		break;
+	}
+	case Items::GEAR:
+		Items::GearExtra* gextraReference = (Items::GearExtra*)(((int32_t*)&itemRef->unknownI5)+1);
+		switch (itemRef->itemType) {
+		case Items::BINOCULAR:
+		{
+			Items::Binocular* mRef = (Items::Binocular*)itemRef;
+			addField(mRef->unknownF2);
+			addField("Zoom? FOV?", mRef->zoomfactor);
+			addField(mRef->unknownI4);
+			gextraReference = &mRef->gextra;
+			break;
+		}
+		case Items::UNIFORM:
+		{
+			Items::Uniform* mRef = (Items::Uniform*)itemRef;
+			addField(mRef->unknownF2);
+			addField(mRef->unknownF3);
+			gextraReference = &mRef->gextra;
+			break;
+		}
+		case Items::HEALING:
+		{
+			Items::Healing* mRef = (Items::Healing*)itemRef;
+			addField("Healing effect", mRef->healpower);
+			addField(mRef->unknownF3);
+			gextraReference = &mRef->gextra;
+			break;
+		}
+		case Items::BACKPACK:
+		{
+			Items::Backpack* mRef = (Items::Backpack*)itemRef;
+			addField(mRef->unknownI4);
+			addField(mRef->unknownF3);
+			addField(mRef->unknownF4);
+			addField(mRef->unknownI5);
+			addField(mRef->unknownF5);
+			addField(mRef->unknownI6);
+			gextraReference = &mRef->gextra;
+			break;
+		}
+		case Items::HEADGEAR:
+		{
+			Items::Headgear* mRef = (Items::Headgear*)itemRef;
+			addField(mRef->unknownF2);
+			addField(mRef->unknownF3);
+			gextraReference = &mRef->gextra;
+			break;
+		}
+		}
+
+		addField(gextraReference->Unknown1);
+		addField(gextraReference->AmmoType);
+		addField(gextraReference->Unknown3);
+		addField(gextraReference->AmmoID);
+		addField(gextraReference->unknownI8);
 	}
 
-
-	scrolleditemList->SetSizer(itemSizer);
-
-	scrolleditemList->SetScrollRate(20, 20);
-	dataChanged = false;
 
 	scrolleditemList->Show();
 	vbp->Layout();
-
 }
 
 void cMain::OnAbout(wxCommandEvent& evt) {
@@ -305,26 +493,277 @@ void cMain::OnValueChange(wxCommandEvent& evt) {
 	if (field > 500) {
 		evt.Skip();
 		return;
-	}
-	// cut down strings if too long
-	if (field < 5) {
-		if (dataFields.at(field)->GetValue().ToStdString().size() > 19)
-			dataFields.at(field)->SetValue(dataFields.at(field)->GetValue().ToStdString().substr(0,19));	
-	}
-
-	// short reference shall not be longer than 7 characters
-	if (field == 32) {
-		if (dataFields.at(field)->GetValue().ToStdString().size() > 7)
-			dataFields.at(field)->SetValue(dataFields.at(field)->GetValue().ToStdString().substr(0, 7));
-	}
-
-	if (!ItemValues->setFieldInformation(selectedItem, field, dataFields.at(field)->GetValue().ToStdString())) {
-		wxMessageBox("Invalid format in field " + std::to_string(field+1) + "! Loading previous value.", "Warning Message", wxICON_WARNING | wxOK);
-		std::string val;
-		ItemValues->getFieldInformation(selectedItem, field, val);
-		dataFields.at(field)->SetValue(val);
+	
 	}
 
 	dataChanged = true;
+
+	/*
+	if (field == 0) {
+		// First selected, record type change
+		int32_t selectedRecord = sections.at(field)->dropDownField->GetSelection();
+		ItemValues->setRecordType(selectedItem, selectedRecord);
+		
+		//refreshDataFields(ItemValues->getItemReference(selectedItem));
+		
+		// delete record internaly if EMPTY selected
+		if (selectedRecord == 3) {
+			ItemValues->removeRecord(selectedItem);
+			selector->SetString(selectedItem, "ID: " + std::to_string(selectedItem) + " | EMPTY SLOT");
+			drawDataFields(true);
+		} else
+			drawDataFields(false);
+
+		evt.Skip();
+		return;
+	}
+	*/
+	sections.at(field)->updateInternalData();
+
+	//wxMessageBox("Selection at " + std::to_string(field) + " with value ", "Warning Message", wxICON_WARNING | wxOK);
+	// 
+	// cut down strings if too long
+
+	//	if (defaultFields.at(field)->GetValue().ToStdString().size() > 19)
+	//		defaultFields.at(field)->SetValue(defaultFields.at(field)->GetValue().ToStdString().substr(0,19));	
+	
+
+	// short reference shall not be longer than 7 characters
+
+	//	if (defaultFields.at(field)->GetValue().ToStdString().size() > 7)
+	//		defaultFields.at(field)->SetValue(defaultFields.at(field)->GetValue().ToStdString().substr(0, 7));
+	
+
+	//if (!ItemValues->setFieldInformation(selectedItem, field, defaultFields.at(field)->GetValue().ToStdString())) {
+	//	wxMessageBox("Invalid format in field " + std::to_string(field+1) + "! Loading previous value.", "Warning Message", wxICON_WARNING | wxOK);
+	//	std::string val;
+	//	ItemValues->getFieldInformation(selectedItem, field, val);
+	//	defaultFields.at(field)->SetValue(val);
+	//}
+
+	
 	evt.Skip();
+	return;
+}
+
+void cMain::addField(float& val) {
+	addField("Unknown", val);
+}
+void cMain::addField(int32_t& val) {
+	addField("Unknown", val);
+}
+
+void cMain::addField(bool& val) {
+	addField("Unknown", val);
+}
+
+void cMain::addField(const char*& val) {
+	addField("Unknown", val);
+}
+
+void cMain::addField(const char* label, float& val) {
+	addField(label, wxString(std::to_string(val)), TyFLOAT, &val);
+}
+void cMain::addField(const char* label, int32_t& val) {
+	addField(label, wxString(std::to_string(val)), TyINT, &val);
+}
+
+void cMain::addField(const char* label, bool& val) {
+	addField(label, wxString(std::to_string(val)), TyBOOL, &val);
+}
+
+void cMain::addField(const char* label, const char* val) {
+	addField(label, wxString(val), TyCHAR, (void* )val);
+}
+
+void cMain::addField(const char* label, wxString val, uint16_t originType, void* valueOrigin)
+{
+	sections.push_back(new Section(this, primaryArea, label, val, originType, valueOrigin));
+	/*
+	wxBoxSizer* colSizer = new wxBoxSizer(wxHORIZONTAL);
+	colSizer->AddSpacer(10);
+
+	colSizer->Add(new wxStaticText(scrolleditemList, wxID_ANY, std::to_string(defaultFields.size() + 1)), 1, wxGROW | wxALL, 2);
+	colSizer->Add(new wxStaticText(scrolleditemList, wxID_ANY, label), 3, wxGROW | wxALL, 2);
+
+	defaultFields.push_back(new wxTextCtrl(scrolleditemList, VALUECHNG + defaultFields.size(), val));
+	colSizer->Add(defaultFields.back(), 3, wxGROW | wxALL, 2);
+	
+	area->Add(colSizer, 1, wxEXPAND);
+	*/
+}
+
+void cMain::addDropDown(const char* label, const std::vector<wxString>& strings, int32_t& select, int32_t altSelect) {
+	sections.push_back(new Section(this, primaryArea, label, strings, select, altSelect));
+}
+
+
+
+cMain::Section::Section(cMain* mainRef, wxBoxSizer* Area, const char* label, wxString val, uint16_t originType, void* originLoc)
+	: mainRef(mainRef), Area(Area), originType(originType), originLoc(originLoc) {
+
+	sectionID = mainRef->sections.size()+1;
+	colSizer = new wxBoxSizer(wxHORIZONTAL);
+	colSizer->AddSpacer(10);
+
+	number = new wxStaticText(scrolleditemList, wxID_ANY, std::to_string(Area->GetItemCount() + 1));
+	txtLabel = new wxStaticText(scrolleditemList, wxID_ANY, label);
+	txtField = new wxTextCtrl(scrolleditemList, VALUECHNG + Area->GetItemCount(), val);
+
+	colSizer->Add(number, 1, wxGROW | wxALL, 2);
+	colSizer->Add(txtLabel, 3, wxGROW | wxALL, 2);
+	colSizer->Add(txtField, 3, wxGROW | wxALL, 2);
+	Area->Add(colSizer, 1, wxEXPAND);
+	// not used
+	dropDownField = nullptr;
+}
+
+cMain::Section::Section(cMain* mainRef, wxBoxSizer* Area, const char* label, const std::vector<wxString>& strings, int32_t& select, int32_t altSelect)
+	: mainRef(mainRef), Area(Area), originType(TyINT), originLoc(&select) {
+
+	sectionID = mainRef->sections.size()+1;
+	colSizer = new wxBoxSizer(wxHORIZONTAL);
+	colSizer->AddSpacer(10);
+
+	number = new wxStaticText(scrolleditemList, wxID_ANY, std::to_string(Area->GetItemCount() + 1));
+	txtLabel = new wxStaticText(scrolleditemList, wxID_ANY, label);
+	dropDownField = new wxComboBox(scrolleditemList, VALUECHNG + Area->GetItemCount(), wxEmptyString, wxDefaultPosition, wxDefaultSize, 0, 0, wxCB_READONLY);
+	for (auto& s : strings)
+		dropDownField->AppendString(s);
+
+	if (altSelect != -1) dropDownField->Select(altSelect);
+		else
+	dropDownField->Select(select);
+
+	colSizer->Add(number, 1, wxGROW | wxALL, 2);
+	colSizer->Add(txtLabel, 3, wxGROW | wxALL, 2);
+	colSizer->Add(dropDownField, 3, wxGROW | wxALL, 2);
+	Area->Add(colSizer, 1, wxEXPAND);
+
+	// not used
+	txtField = nullptr;
+}
+
+bool cMain::Section::updateInternalData()
+{
+	if (txtField) {
+		switch (originType) {
+		case TyCHAR:
+			return updateField((char*)originLoc, txtField->GetValue());
+		case TyINT:
+			return updateField((int32_t*)originLoc, txtField->GetValue());
+		case TyBOOL:
+			return updateField((bool*)originLoc, txtField->GetValue());
+		case TyFLOAT:
+			return updateField((float*)originLoc, txtField->GetValue());
+		}
+	}
+	else if (dropDownField) {
+
+		bool skipMsg = false;
+		int32_t newVal = dropDownField->GetSelection();
+
+		if (sectionID == 1) {
+			 // record type selection
+			//mainRef->ItemValues->setRecordType(mainRef->selectedItem, newVal);
+
+			if (newVal == Items::EMPTY) {
+				// empty selected, delete record and update selection menu
+				mainRef->ItemValues->removeRecord(mainRef->selectedItem);
+				mainRef->selector->SetString(mainRef->selectedItem, "ID: " + std::to_string(mainRef->selectedItem) + " | EMPTY SLOT");
+				skipMsg = true;
+			}
+		}
+		else {
+			switch (*mainRef->ItemValues->getRecordType(mainRef->selectedItem)) {
+			case Items::WEAPONS:
+				// there is no 5 in this category, step up
+				if (sectionID > 12) {
+					// probably the "special" extra data section
+					if (newVal == 1) newVal = 5;
+				}
+				else {
+					newVal++;
+					if (newVal == 5) newVal++;
+
+					// also update field Q automatically.
+					*(((int32_t*)originLoc) + 2) = newVal - 1;
+				}
+					
+				break;
+			case Items::GEAR:
+				if (newVal != 0) newVal += 4;
+				break;
+			}
+			
+		}
+
+		*(int32_t*)originLoc = newVal;
+		mainRef->ItemValues->resetSubRecord(mainRef->selectedItem, sectionID, (int32_t*)originLoc);
+		mainRef->drawDataFields(skipMsg);
+		return true;
+	}
+	return false;
+}
+
+bool cMain::Section::updateField(int32_t* dest, wxString newValue)
+{
+	bool result;
+	if (newValue.empty()) {
+		*dest = 0;
+		return true;
+	}
+	if (result = newValue.ToLong((long*)dest))	return result;
+	wxMessageBox("Format error! Correcting to previous value.", "Warning Message", wxICON_WARNING | wxOK);
+	return result;
+}
+
+bool cMain::Section::updateField(bool* dest, wxString newValue)
+{
+	bool result;
+	if (newValue.empty()) {
+		*dest = 0;
+		return true;
+	}
+	int32_t output;
+	if (result = newValue.ToLong((long*)&output)) {
+		// normalize
+		if (output >= 1) *dest = true;
+		else if (output <= 0) *dest = false;
+		txtField->ChangeValue(std::to_string(*dest));
+		return result;
+	}
+	wxMessageBox("Format error! Correcting to previous value.", "Warning Message", wxICON_WARNING | wxOK);
+	txtField->ChangeValue(std::to_string(*dest));
+	return result;
+}
+
+bool cMain::Section::updateField(float* dest, wxString newValue)
+{
+	double tmp;
+	bool out;
+
+	if (newValue.empty()) {
+		*dest = 0.0f;
+		return true;
+	}
+	if (out = newValue.ToDouble(&tmp)) {
+		*dest = (float)tmp;
+		return out;
+	}
+	wxMessageBox("Format error! Correcting to previous value.", "Warning Message", wxICON_WARNING | wxOK);
+	return out;
+}
+
+bool cMain::Section::updateField(char* dest, wxString newValue) {
+
+	// make sure string does not get out of bounds
+	if (newValue.size() > STRINGSIZE - 1) newValue = newValue.substr(0, STRINGSIZE - 1);
+	// if label, also update the selection menu
+	if (sectionID == 5) {
+		mainRef->selector->SetString(mainRef->selectedItem, "ID: " + std::to_string(mainRef->selectedItem) + " | " + newValue);
+	}
+	memcpy(dest, newValue.data(), newValue.size() + 1);
+	txtField->ChangeValue(newValue);
+	return true;
 }
