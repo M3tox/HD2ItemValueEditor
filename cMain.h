@@ -7,6 +7,8 @@
 
 #include "Items.h"
 
+static wxScrolledWindow* scrolleditemList;
+
 class cMain : public wxFrame
 {
 public:
@@ -20,7 +22,7 @@ public:
 		{
 			Centre();
 			SetBackgroundColour(wxColor(0xFF, 0xFF, 0xFF));
-			text = new wxStaticText(this, wxID_ANY, "H&D2 Item Value Editor, version 0.90\nSupports \"items.sav\" files\nProgrammed by Metox\nCopyright (c) 2023", wxPoint(10, 10));
+			text = new wxStaticText(this, wxID_ANY, "H&D2 Item Value Editor, version 0.96\nSupports \"items.sav\" files\nProgrammed by Metox\nCopyright (c) 2024", wxPoint(10, 10));
 			okBtn = new wxButton(this, 11001, "OK", wxPoint(100, 75));
 		}
 
@@ -35,13 +37,6 @@ public:
 		wxButton* okBtn = nullptr;
 	};
 
-public:
-	wxButton* m_btn1 = nullptr;
-	wxButton* m_btn2 = nullptr;
-
-	wxTextCtrl* m_txt1 = nullptr;
-
-	Items* ItemValues = nullptr;
 
 	void OnMenuOpenFile(wxCommandEvent& evt);
 	void OnMenuSaveFile(wxCommandEvent& evt);
@@ -52,11 +47,59 @@ public:
 	void OnValueChange(wxCommandEvent& evt);
 	void OnClose(wxCloseEvent& evt);
 	void OnSelectionChange(wxCommandEvent& evt);
-	void OnSelectRecChange(wxCommandEvent& evt);
 
 	wxDECLARE_EVENT_TABLE();
 
 private:
+
+	enum {
+		TyCHAR,
+		TyINT,
+		TyFLOAT,
+		TyBOOL
+	};
+
+	struct Section {
+		Section(cMain* mainRef, wxBoxSizer* Area, const char* label, wxString val, uint16_t originType, void* originLoc);
+		Section(cMain* mainRef, wxBoxSizer* Area, const char* label, const std::vector<wxString>& strings, int32_t& select, int32_t altSelect = -1);
+		~Section() {
+			Area->Remove(colSizer);
+
+			delete number;
+			delete txtLabel;
+			delete txtField;
+
+			delete dropDownField;
+		}
+		
+		bool updateInternalData();
+
+		wxStaticText* number;
+		wxStaticText* txtLabel;
+		wxTextCtrl* txtField;
+		// alternative
+		wxComboBox* dropDownField;
+	private:
+		wxBoxSizer* colSizer;
+		wxBoxSizer* Area;
+
+		cMain* mainRef;
+		uint16_t sectionID;
+		uint16_t originType;
+		void* originLoc;
+
+		bool updateField(int32_t* dest, wxString newValue);
+		bool updateField(bool* dest, wxString newValue);
+		bool updateField(float* dest, wxString newValue);
+		bool updateField(char* dest, wxString newValue);
+	};
+
+	wxButton* m_btn1 = nullptr;
+	wxButton* m_btn2 = nullptr;
+
+	wxTextCtrl* m_txt1 = nullptr;
+
+	Items* ItemValues = nullptr;
 
 	wxMenuBar* m_MenuBar = nullptr;
 	wxMenu* menuFile = nullptr;
@@ -65,14 +108,18 @@ private:
 	wxPanel* topInfoPlane = nullptr;
 	wxStaticText* infoText = nullptr;
 	wxComboBox* selector = nullptr;
-	wxComboBox* selectorRecord = nullptr;
+
 
 	wxBoxSizer* vbp = nullptr;
-	wxScrolledWindow* scrolleditemList = nullptr;
+
 
 	uint32_t selectedItem = 0;
-	std::vector<wxTextCtrl*>dataFields;
-	
+	//std::vector<wxTextCtrl*>defaultFields;
+	//Section* mainSections[12];
+	std::vector<Section*>sections;
+
+	wxBoxSizer* primaryArea = nullptr;
+
 
 	wAbout* about = nullptr;
 
@@ -80,6 +127,21 @@ private:
 
 	wxString pathOpened;
 
-	void refreshDisplayedData();
+	void drawDataFields(bool skipMsg = false);
+	void refreshDataFields(Items::ItemBase* itemRef);
+
+	void addField(float& val);
+	void addField(int32_t& val);
+	void addField(bool& val);
+	void addField(const char*& val);
+	void addField(const char* label, float& val);
+	void addField(const char* label, int32_t& val);
+	void addField(const char* label, bool& val);
+	void addField(const char* label, const char* val);
+	void addField(const char* label, wxString val, uint16_t originType, void* originLoc);
+
+	void addDropDown(const char* label, const std::vector<wxString>& strings, int32_t& select, int32_t altSelect = -1);
+
+
 };
 
