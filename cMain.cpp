@@ -497,50 +497,7 @@ void cMain::OnValueChange(wxCommandEvent& evt) {
 	}
 
 	dataChanged = true;
-
-	/*
-	if (field == 0) {
-		// First selected, record type change
-		int32_t selectedRecord = sections.at(field)->dropDownField->GetSelection();
-		ItemValues->setRecordType(selectedItem, selectedRecord);
-		
-		//refreshDataFields(ItemValues->getItemReference(selectedItem));
-		
-		// delete record internaly if EMPTY selected
-		if (selectedRecord == 3) {
-			ItemValues->removeRecord(selectedItem);
-			selector->SetString(selectedItem, "ID: " + std::to_string(selectedItem) + " | EMPTY SLOT");
-			drawDataFields(true);
-		} else
-			drawDataFields(false);
-
-		evt.Skip();
-		return;
-	}
-	*/
 	sections.at(field)->updateInternalData();
-
-	//wxMessageBox("Selection at " + std::to_string(field) + " with value ", "Warning Message", wxICON_WARNING | wxOK);
-	// 
-	// cut down strings if too long
-
-	//	if (defaultFields.at(field)->GetValue().ToStdString().size() > 19)
-	//		defaultFields.at(field)->SetValue(defaultFields.at(field)->GetValue().ToStdString().substr(0,19));	
-	
-
-	// short reference shall not be longer than 7 characters
-
-	//	if (defaultFields.at(field)->GetValue().ToStdString().size() > 7)
-	//		defaultFields.at(field)->SetValue(defaultFields.at(field)->GetValue().ToStdString().substr(0, 7));
-	
-
-	//if (!ItemValues->setFieldInformation(selectedItem, field, defaultFields.at(field)->GetValue().ToStdString())) {
-	//	wxMessageBox("Invalid format in field " + std::to_string(field+1) + "! Loading previous value.", "Warning Message", wxICON_WARNING | wxOK);
-	//	std::string val;
-	//	ItemValues->getFieldInformation(selectedItem, field, val);
-	//	defaultFields.at(field)->SetValue(val);
-	//}
-
 	
 	evt.Skip();
 	return;
